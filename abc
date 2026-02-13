@@ -1,0 +1,81 @@
+import streamlit as st
+import pandas as pd
+import pickle
+from sklearn.preprocessing import LabelEncoder
+import numpy as np
+
+# Load the trained model and scaler
+try:
+    with open('/content/drive/MyDrive/model_random_forest.pkl', 'rb') as file:
+        loaded_model = pickle.load(file)
+    with open('/content/drive/MyDrive/scaler_gaji.pkl', 'rb') as file:
+        loaded_scaler = pickle.load(file)
+    st.success("Model dan Scaler berhasil dimuat.")
+except FileNotFoundError:
+    st.error("Pastikan 'model_random_forest.pkl' dan 'scaler_gaji.pkl' ada di Google Drive Anda.")
+    st.stop()
+
+# --- Prepare Preprocessing Components ---
+# 1. Muat ulang dataset 'dataset_pelatihan_vokasi_dirty.csv' untuk mendapatkan nilai-nilai preprocessing
+try:
+    df_raw = pd.read_csv('/content/drive/MyDrive/BPVP: Short Course Basic Data Science/dataset_pelatihan_vokasi_dirty.csv')
+    st.success("Dataset pelatihan berhasil dimuat ulang.")
+except FileNotFoundError:
+    st.error("Pastikan 'dataset_pelatihan_vokasi_dirty.csv' ada di Google Drive Anda.")
+    st.stop()
+
+# 2. Lakukan langkah-langkah pembersihan awal
+# Hapus kolom ID_Peserta dan Nama
+df_cleaned_temp = df_raw.drop(['ID_Peserta', 'Nama'], axis=1)
+
+# Standarisasi Jenis_Kelamin
+mapping_gender = {'Pria':'Laki-laki', 'L':'Laki-laki', 'laki-laki':'Laki-laki', 'perempuan':'Perempuan', 'Wanita':'Perempuan', 'wanita':'Perempuan', "P":'Perempuan'}
+df_cleaned_temp['Jenis_Kelamin'] = df_cleaned_temp['Jenis_Kelamin'].replace(mapping_gender)
+
+# Imputasi Usia dan Gaji_Pertama_Juta (untuk mendapatkan median yang benar)
+median_usia = df_cleaned_temp['Usia'].median()
+median_gaji = df_cleaned_temp['Gaji_Pertama_Juta'].median()
+modus_jurusan = df_cleaned_temp['Jurusan'].mode()[0]
+
+df_cleaned_temp['Usia'].fillna(median_usia, inplace=True)
+df_cleaned_temp['Gaji_Pertama_Juta'].fillna(median_gaji, inplace=True)
+df_cleaned_temp['Jurusan'].fillna(modus_jurusan, inplace=True)
+
+# Menentukan batas atas untuk filtering outlier (dari notebook sebelumnya)
+Q1_usia = df_cleaned_temp['Usia'].quantile(0.25)
+Q3_usia = df_cleaned_temp['Usia'].quantile(0.75)
+IQR_usia = Q3_usia - Q1_usia
+batas_atas_usia = Q3_usia + (1.5 * IQR_usia)
+
+Q1_gaji = df_cleaned_temp['Gaji_Pertama_Juta'].quantile(0.25)
+Q3_gaji = df_cleaned_temp['Gaji_Pertama_Juta'].quantile(0.75)
+IQR_gaji = Q3_gaji - Q1_gaji
+batas_atas_gaji = Q3_gaji + (1.5 * IQR_gaji)
+
+# Terapkan filtering outlier untuk mendapatkan df_bersih yang sama seperti saat training
+df_bersih = df_cleaned_temp[
+    (df_cleaned_temp['Usia'] <= batas_atas_usia) &
+    (df_cleaned_temp['Gaji_Pertama_Juta'] <= batas_atas_gaji)
+].copy()
+
+# 3. Tentukan dan sesuaikan (fit) objek LabelEncoder untuk kolom 'Pendidikan' dan 'Jurusan'
+le_pendidikan = LabelEncoder()
+le_jurusan = LabelEncoder()
+
+le_pendidikan.fit(df_bersih['Pendidikan'])
+le_jurusan.fit(df_bersih['Jurusan'])
+
+# Mendapatkan unique values dari dataframe asli untuk selectbox Streamlit
+unique_pendidikan = df_raw['Pendidikan'].unique().tolist()
+unique_jurusan = df_raw['Jurusan'].unique().tolist()
+unique_jenis_kelamin = df_raw['Jenis_Kelamin'].replace(mapping_gender).unique().tolist()
+unique_status_bekerja = df_raw['Status_Bekerja'].unique().tolist()
+
+
+# 4. Mendefinisikan urutan kolom fitur (feature_cols_order)
+# Ini harus sama persis dengan urutan fitur yang digunakan saat pelatihan model
+feature_cols_order = ['Usia', 'Durasi_Jam', 'Nilai_Ujian', 'Pendidikan', 'Jurusan',
+                      'Jenis_Kelamin_Laki-laki', 'Jenis_Kelamin_Perempuan',
+                      'Status_Bekerja_Belum Bekerja', 'Status_Bekerja_Sudah Bekerja']
+
+st.write("Persiapan preprocessing selesai.")
