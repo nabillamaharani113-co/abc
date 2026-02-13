@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import pickle
@@ -11,17 +10,19 @@ import os
 # IMPORTANT: Adjust these paths if your app.py is not in the same directory as your .pkl files
 # For local deployment, you might place .pkl files in the same directory as app.py
 # or specify an absolute path.
-filename_model = 'model_random_forest.pkl' # Assuming model is in the same directory
-filename_scaler = 'scaler_gaji.pkl'     # Assuming scaler is in the same directory
+filename_model = 'model_random_forest.pkl'
+filename_scaler = 'scaler_gaji.pkl'
 
 # Helper function to safely display Streamlit messages or fall back to print
 def display_ui_message(message, is_error=False):
+    # Check if streamlit is loaded and an active session exists
     if 'streamlit' in sys.modules and hasattr(st, 'runtime') and st.runtime.exists():
         if is_error:
             st.error(message)
         else:
             st.success(message)
     else:
+        # Fallback to print if not in Streamlit app
         if is_error:
             print(f"ERROR: {message}")
         else:
@@ -31,6 +32,7 @@ def stop_application():
     if 'streamlit' in sys.modules and hasattr(st, 'runtime') and st.runtime.exists():
         st.stop()
     else:
+        # If not running as a Streamlit app, exit the script
         sys.exit(1)
 
 # Load the Random Forest model
@@ -58,82 +60,50 @@ except Exception as e:
     stop_application()
 
 # --- Preprocessing components start ---
-# IMPORTANT: Adjust this path if your dataset is not accessible in the deployed environment
-# For local deployment, you might place the CSV in the same directory as app.py
-DRIVE_PATH = './' # Assuming dataset is in the same directory for local deployment
-dataset_name = 'dataset_pelatihan_vokasi_dirty.csv'
+# Hardcoded unique values for categorical features (based on the training data)
+unique_pendidikan = ['SMA', 'SMK', 'D3', 'S1']
+unique_jurusan = ['Administrasi', 'Teknik Las', 'Desain Grafis', 'Teknik Listrik', 'Otomotif']
+unique_jenis_kelamin = ['Laki-laki', 'Perempuan']
+unique_status_bekerja = ['Sudah Bekerja', 'Belum Bekerja']
 
-try:
-    df_raw = pd.read_csv(DRIVE_PATH + dataset_name)
-    display_ui_message("Dataset pelatihan berhasil dimuat ulang.")
-except FileNotFoundError:
-    display_ui_message(f"Error: Dataset file not found at {DRIVE_PATH + dataset_name}. Please ensure the file exists.", is_error=True)
-    stop_application()
-except Exception as e:
-    display_ui_message(f"Error loading dataset: {e}", is_error=True)
-    stop_application()
-
-df_cleaned_temp = df_raw.drop(['ID_Peserta', 'Nama'], axis=1)
-
-mapping_gender = {'Pria':'Laki-laki', 'L':'Laki-laki', 'laki-laki':'Laki-laki', 'perempuan':'Perempuan', 'Wanita':'Perempuan', 'wanita':'Perempuan', "P":'Perempuan'}
-df_cleaned_temp['Jenis_Kelamin'] = df_cleaned_temp['Jenis_Kelamin'].replace(mapping_gender)
-
-median_usia = df_cleaned_temp['Usia'].median()
-median_gaji = df_cleaned_temp['Gaji_Pertama_Juta'].median()
-modus_jurusan = df_cleaned_temp['Jurusan'].mode()[0]
-
-df_cleaned_temp['Usia'] = df_cleaned_temp['Usia'].fillna(median_usia)
-df_cleaned_temp['Gaji_Pertama_Juta'] = df_cleaned_temp['Gaji_Pertama_Juta'].fillna(median_gaji)
-df_cleaned_temp['Jurusan'] = df_cleaned_temp['Jurusan'].fillna(modus_jurusan)
-
-Q1_usia = df_cleaned_temp['Usia'].quantile(0.25)
-Q3_usia = df_cleaned_temp['Usia'].quantile(0.75)
-IQR_usia = Q3_usia - Q1_usia
-batas_atas_usia = Q3_usia + (1.5 * IQR_usia)
-
-Q1_gaji = df_cleaned_temp['Gaji_Pertama_Juta'].quantile(0.25)
-Q3_gaji = df_cleaned_temp['Gaji_Pertama_Juta'].quantile(0.75)
-IQR_gaji = Q3_gaji - Q1_gaji
-batas_atas_gaji = Q3_gaji + (1.5 * IQR_gaji)
-
-df_bersih = df_cleaned_temp[
-    (df_cleaned_temp['Usia'] <= batas_atas_usia) &
-    (df_cleaned_temp['Gaji_Pertama_Juta'] <= batas_atas_gaji)
-].copy()
-
+# Initialize and fit LabelEncoders with the hardcoded unique values
 le_pendidikan = LabelEncoder()
-le_jurusan = LabelEncoder()
+le_pendidikan.fit(unique_pendidikan)
 
-le_pendidikan.fit(df_bersih['Pendidikan'])
-le_jurusan.fit(df_bersih['Jurusan'])
+le_jurusan = LabelEncoder()
+le_jurusan.fit(unique_jurusan)
 
 label_encoders = {
     'Pendidikan': le_pendidikan,
     'Jurusan': le_jurusan
 }
 
-unique_pendidikan = df_raw['Pendidikan'].unique().tolist()
-unique_jurusan = df_raw['Jurusan'].unique().tolist()
-unique_jenis_kelamin = df_raw['Jenis_Kelamin'].replace(mapping_gender).unique().tolist()
-unique_status_bekerja = df_raw['Status_Bekerja'].unique().tolist()
-
+# Define the exact order of feature columns that the trained model expects
 feature_cols_order = ['Usia', 'Durasi_Jam', 'Nilai_Ujian', 'Pendidikan', 'Jurusan',
                       'Jenis_Kelamin_Laki-laki', 'Jenis_Kelamin_Perempuan',
                       'Status_Bekerja_Belum Bekerja', 'Status_Bekerja_Sudah Bekerja']
 
-def preprocess_input(user_input, label_encoders, loaded_scaler, feature_cols_order, mapping_gender):
+display_ui_message("Persiapan preprocessing selesai (tanpa file CSV).")
+
+def preprocess_input(user_input, label_encoders, loaded_scaler, feature_cols_order):
     input_df = pd.DataFrame([user_input])
+
+    # Ensure consistent gender mapping (although unique_jenis_kelamin already clean)
+    mapping_gender = {'Pria':'Laki-laki', 'L':'Laki-laki', 'laki-laki':'Laki-laki', 'perempuan':'Perempuan', 'Wanita':'Perempuan', 'wanita':'Perempuan', "P":'Perempuan'}
     input_df['Jenis_Kelamin'] = input_df['Jenis_Kelamin'].replace(mapping_gender)
 
     processed_features = pd.DataFrame(0, index=[0], columns=feature_cols_order)
 
+    # Populate numerical features
     processed_features['Usia'] = input_df['Usia'].values[0]
     processed_features['Durasi_Jam'] = input_df['Durasi_Jam'].values[0]
     processed_features['Nilai_Ujian'] = input_df['Nilai_Ujian'].values[0]
 
+    # Apply Label Encoding
     processed_features['Pendidikan'] = label_encoders['Pendidikan'].transform([input_df['Pendidikan'].values[0]])[0]
     processed_features['Jurusan'] = label_encoders['Jurusan'].transform([input_df['Jurusan'].values[0]])[0]
 
+    # Apply One-Hot Encoding for Jenis_Kelamin
     if input_df['Jenis_Kelamin'].values[0] == 'Laki-laki':
         processed_features['Jenis_Kelamin_Laki-laki'] = 1
         processed_features['Jenis_Kelamin_Perempuan'] = 0
@@ -141,6 +111,7 @@ def preprocess_input(user_input, label_encoders, loaded_scaler, feature_cols_ord
         processed_features['Jenis_Kelamin_Laki-laki'] = 0
         processed_features['Jenis_Kelamin_Perempuan'] = 1
 
+    # Apply One-Hot Encoding for Status_Bekerja
     if input_df['Status_Bekerja'].values[0] == 'Belum Bekerja':
         processed_features['Status_Bekerja_Belum Bekerja'] = 1
         processed_features['Status_Bekerja_Sudah Bekerja'] = 0
@@ -148,9 +119,15 @@ def preprocess_input(user_input, label_encoders, loaded_scaler, feature_cols_ord
         processed_features['Status_Bekerja_Belum Bekerja'] = 0
         processed_features['Status_Bekerja_Sudah Bekerja'] = 1
 
+    # Ensure the order of columns is correct before scaling
+    processed_features = processed_features[feature_cols_order]
+
+    # Scale the features
     scaled_features = loaded_scaler.transform(processed_features)
 
     return scaled_features
+
+display_ui_message("Fungsi `preprocess_input` telah didefinisikan.")
 
 # --- UI elements start ---
 st.title('Prediksi Gaji Pertama Peserta Pelatihan Vokasi')
@@ -184,8 +161,7 @@ if predict_button:
         user_input,
         label_encoders,
         loaded_scaler,
-        feature_cols_order,
-        mapping_gender
+        feature_cols_order
     )
 
     preprocessed_df_for_prediction = pd.DataFrame(preprocessed_input_data, columns=feature_cols_order)
